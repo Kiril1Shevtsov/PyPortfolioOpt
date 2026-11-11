@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -50,6 +52,87 @@ def test_returns_from_prices():
     pd.testing.assert_series_equal(returns_df.iloc[-1], df.pct_change().iloc[-1])
 
 
+@pytest.mark.parametrize("log_returns", [False, True])
+@pytest.mark.parametrize("invalid_price", [0.0, -1.0])
+@pytest.mark.parametrize("as_series", [False, True])
+def test_nonpositive_prices_warn_without_changing_returns(
+    log_returns, invalid_price, as_series
+):
+    prices = pd.DataFrame(
+        {"WTI": [100.0, 101.0, invalid_price, 2.0]},
+        index=pd.date_range("2020-04-18", periods=4),
+    )
+    if as_series:
+        prices = prices["WTI"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        expected = prices.pct_change(fill_method=None)
+        if log_returns:
+            expected = np.log(1 + expected)
+        expected = expected.dropna(how="all")
+        with pytest.warns(UserWarning, match="Non-positive price.*WTI.*2020-04-20"):
+            actual = expected_returns.returns_from_prices(prices, log_returns)
+    if as_series:
+        pd.testing.assert_series_equal(actual, expected)
+    else:
+        pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_nonpositive_price_warning_names_first_asset_and_index():
+    prices = pd.DataFrame(
+        {"good": [10.0, 11.0, 12.0], "bad": [10.0, -2.0, -3.0]},
+        index=["start", "first negative", "second negative"],
+    )
+    with pytest.warns(UserWarning, match="asset 'bad'.*'first negative'") as records:
+        expected_returns.returns_from_prices(prices)
+    assert len(records) == 1
+
+
+def test_positive_prices_and_missing_values_do_not_warn():
+    prices = pd.DataFrame({"A": [np.nan, 10.0, 11.0], "B": [20.0, np.nan, 21.0]})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        expected_returns.returns_from_prices(prices)
+
+
+def test_nullable_prices_warn_and_ignore_missing_values():
+    prices = pd.DataFrame({"A": pd.Series([pd.NA, 1.0, -1.0], dtype="Float64")})
+    with pytest.warns(UserWarning, match="Non-positive price.*asset 'A'.*index 2"):
+        expected_returns.returns_from_prices(prices)
+
+
+@pytest.mark.parametrize(
+    "method", ["mean_historical_return", "ema_historical_return", "capm_return"]
+)
+def test_return_estimators_warn_for_nonpositive_prices(method):
+    prices = pd.DataFrame({"A": [10.0, 11.0, -1.0, -2.0]})
+    with pytest.warns(UserWarning, match="Non-positive price.*asset 'A'"):
+        getattr(expected_returns, method)(prices, compounding=False)
+
+
+@pytest.mark.parametrize(
+    "method", ["mean_historical_return", "ema_historical_return", "capm_return"]
+)
+def test_negative_return_data_does_not_trigger_price_warning(method):
+    returns = pd.DataFrame({"A": [0.1, -0.2, 0.0, 0.03]})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        getattr(expected_returns, method)(returns, returns_data=True)
+
+
+def test_total_loss_return_is_preserved():
+    prices = pd.DataFrame({"A": [10.0, 0.0]})
+    with pytest.warns(UserWarning, match="Non-positive price"):
+        actual = expected_returns.returns_from_prices(prices)
+    assert actual.iloc[0, 0] == -1.0
+
+
+def test_nonpositive_benchmark_prices_warn():
+    prices = pd.DataFrame({"A": [10.0, 11.0, 12.0, 13.0]})
+    benchmark = pd.DataFrame({"benchmark": [5.0, 4.0, -1.0, -2.0]})
+    with pytest.warns(UserWarning, match="Non-positive price.*asset 'benchmark'"):
+        expected_returns.capm_return(prices, benchmark, compounding=False)
+
+
 def test_returns_warning():
     df = get_data()
     df.iloc[3, :] = 0  # make some prices zero
@@ -76,11 +159,15 @@ def test_mean_historical_returns_dummy():
             [4.1, 2.2, 0.63, -10.1],
         ]
     )
-    mean = expected_returns.mean_historical_return(data, frequency=1)
+    with pytest.warns(UserWarning, match="Non-positive price.*asset 3"):
+        mean = expected_returns.mean_historical_return(data, frequency=1)
     test_answer = pd.Series([0.0061922, 0.0241137, 0.0122722, -0.0421775])
     pd.testing.assert_series_equal(mean, test_answer, rtol=1e-3)
 
-    mean = expected_returns.mean_historical_return(data, compounding=False, frequency=1)
+    with pytest.warns(UserWarning, match="Non-positive price.*asset 3"):
+        mean = expected_returns.mean_historical_return(
+            data, compounding=False, frequency=1
+        )
     test_answer = pd.Series([0.0086560, 0.0250000, 0.0128697, -0.03632333])
     pd.testing.assert_series_equal(mean, test_answer, rtol=1e-3)
 

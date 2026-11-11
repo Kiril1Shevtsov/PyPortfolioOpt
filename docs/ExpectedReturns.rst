@@ -22,6 +22,20 @@ superior models and feed them into the optimizer.
     As of v0.5.0, you can use :ref:`black-litterman` to significantly improve the quality of
     your estimate of the expected returns.
 
+.. warning::
+
+    Converting prices to returns assumes a suitable price and return convention for
+    the instrument. ``returns_from_prices`` warns if a price is zero or negative,
+    identifying the first affected asset and index. A negative denominator can reverse
+    the interpretation of a percentage price change, and a zero denominator or a
+    non-positive price ratio can produce non-finite percentage or log returns.
+
+    This warning does not change the calculation. For example, a price falling from a
+    positive value to zero still gives a simple return of -100%. For instruments that
+    can trade at negative prices, consider a return model based on price changes and
+    the relevant capital or exposure. Absolute price changes alone are not percentage
+    returns and should not be passed as such to a portfolio optimizer.
+
 .. automodule:: pypfopt.expected_returns
 
     .. note::

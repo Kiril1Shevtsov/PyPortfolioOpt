@@ -50,11 +50,34 @@ def returns_from_prices(prices, log_returns=False):
     log_returns : bool, optional
         whether to compute using log returns. Defaults to False.
 
+    Warns
+    -----
+    UserWarning
+        If a non-positive price is present. The warning identifies the first
+        affected asset and index. The calculated returns are unchanged.
+
     Returns
     -------
     pd.DataFrame
         (daily) returns
     """
+    nonpositive = (prices <= 0).fillna(False).to_numpy(dtype=bool)
+    if np.any(nonpositive):
+        first = np.unravel_index(np.argmax(nonpositive), nonpositive.shape)
+        row = first[0]
+        asset = (
+            prices.columns[first[1]]
+            if isinstance(prices, pd.DataFrame)
+            else prices.name
+        )
+        warnings.warn(
+            f"Non-positive price for asset {asset!r} at index {prices.index[row]!r}. "
+            "Percentage and log returns may be misleading or non-finite. "
+            "Check the return convention before using these prices for "
+            "portfolio optimization.",
+            UserWarning,
+            stacklevel=2,
+        )
     if log_returns:
         returns = np.log(1 + prices.pct_change(fill_method=None)).dropna(how="all")
     else:
